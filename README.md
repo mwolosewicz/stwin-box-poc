@@ -1,0 +1,161 @@
+# STWIN.box – narzędzia do PoC
+
+Zestaw skryptów do pracy z płytką **STEVAL-STWINBX1** (STWIN.box) z firmware'em
+**FP-SNS-DATALOG2**, przez USB, bez karty SD i bez telefonu.
+
+Cel: móc w jednej komendzie nagrać drgania maszyny, w drugiej zobaczyć widmo,
+a w trzeciej porównać stan sprawny z uszkodzonym.
+
+## Instalacja
+
+```bash
+git clone <adres-tego-repo> ~/git/stwin-box-poc
+cd ~/git/stwin-box-poc
+./setup.sh
+```
+
+`setup.sh` klonuje SDK ST, pobiera jego submoduły, tworzy izolowane środowisko
+na Pythonie 3.12 i instaluje wszystko, co potrzebne. Można go uruchamiać
+wielokrotnie. Zajmuje ok. 2–3 minut przy pierwszym uruchomieniu.
+
+Potem podłącz płytkę kablem USB-C (musi obsługiwać dane, nie tylko ładowanie) i:
+
+```bash
+./stwin probe
+```
+
+## Użycie
+
+### Sprawdzenie płytki
+
+```bash
+./stwin probe            # firmware, lista czujników, do czego który służy
+./stwin probe --json     # pełny status urządzenia
+```
+
+### Nagrywanie
+
+```bash
+./stwin record tlo_biurko --duration 6
+./stwin record wentylator_sprawny --duration 20
+./stwin record wentylator_niewywazony --duration 20 --opis "plastelina 2 g na łopatce"
+./stwin record pralka --sensor ism330dhcx_acc --duration 600
+```
+
+Nagranie ląduje w `nagrania/<nazwa>_<data>/` jako komplet plików HSDatalog:
+surowe `.dat`, `device_config.json` i `acquisition_info.json`. Domyślnie
+nagrywany jest `iis3dwb_acc`, a pozostałe czujniki są wyłączane, żeby nie
+mieszać strumieni o bardzo różnych częstotliwościach.
+
+### Analiza
+
+```bash
+./stwin analyze nagrania/wentylator_sprawny_20260901_204512
+./stwin analyze nagrania/wentylator_sprawny_20260901_204512 --rpm 2400 --fmax 300
+```
+
+Zapisuje `widmo.png` w katalogu nagrania: przebieg czasowy, widmo amplitudowe
+w pełnym paśmie i PSD w zakresie niskich częstotliwości. `--rpm` dorysowuje
+znaczniki 1x, 2x, 3x częstotliwości obrotowej — niewyważenie siedzi przy 1x.
+
+### Porównanie stanu sprawnego z uszkodzonym
+
+```bash
+./stwin compare nagrania/wentylator_sprawny_... nagrania/wentylator_niewywazony_... --rpm 2400
+```
+
+Nakłada oba widma i rysuje ich stosunek. Wypisuje, przy której częstotliwości
+wzrost jest największy i ile wynosi. To jest najszybszy sposób sprawdzenia, czy
+uszkodzenie w ogóle jest widoczne — zanim zacznie się budować model.
+
+Szczyt jest szukany na krzywej wygładzonej (`--smooth`, domyślnie 9 prążków),
+bo estymator Welcha na samym szumie potrafi dać kilkukrotne skoki
+w pojedynczych prążkach. Jeśli wygładzony wzrost nie przekracza 2x, skrypt
+mówi wprost, że klasy nie są rozdzielone.
+
+### Eksport do NanoEdge AI Studio
+
+```bash
+./stwin nanoedge nagrania/wentylator_sprawny_... -sl 1024 -o dataset/normalne
+./stwin nanoedge nagrania/wentylator_niewywazony_... -sl 1024 -o dataset/anomalie
+```
+
+`-sl` to długość okna w próbkach; musi być taka sama dla obu klas i taka sama
+jak w konfiguracji na urządzeniu. Wywołuje oryginalny konwerter ST, więc
+przyjmuje wszystkie jego opcje (`-h` pokaże pełną listę).
+
+## Wybór czujnika
+
+Płytka ma dziewięć czujników i jeden z nich zwykle jest oczywistym wyborem.
+
+| Zadanie | Czujnik | Uwagi |
+|---|---|---|
+| Drgania maszyn, łożyska | `iis3dwb_acc` | 26,7 kHz, pasmo do 6 kHz, 75 µg/√Hz |
+| Długie nagrania (godziny) | `ism330dhcx_acc` | 18 MB/h zamiast 570 MB/h |
+| Wycieki sprężonego powietrza | `imp23absu_mic` | pasmo do 80 kHz, ultradźwięki 25–45 kHz |
+| Przepływ wody, zdarzenia dźwiękowe | `imp34dt05_mic` | pasmo słyszalne |
+| Przechylenia, bardzo niskie f | `iis2iclx_acc` | ±0,5 g, 15 µg/√Hz |
+| Wykrycie pracy silnika | `iis2mdc_mag` | pole rozproszone, darmowy sygnał „urządzenie pobiera prąd" |
+| Czuwanie na baterii | `iis2dlpc_acc` | kilka µA, wybudzanie po progu |
+
+## Rzeczy, które zaskakują
+
+**Rzeczywiste ODR odbiega od katalogowego.** IIS3DWB przy nominalnych 26 667 Hz
+próbkuje realnie ok. 26 316 Hz. Przy 5 kHz to błąd 66 Hz, wystarczający, żeby
+rozminąć się z częstotliwością łożyskową. Skrypty liczą `fs` ze znaczników
+czasu, nie z nominału — jeśli będziesz pisał własną analizę, rób tak samo.
+
+**ODR i FS w modelu urządzenia to indeksy enum, nie herce i nie g.** `odr=0`
+dla IIS3DWB oznacza jedyną dostępną wartość, czyli 26 667 Hz.
+
+**Aplikacja ST BLE Sensor pokazuje niepełną listę czujników.** Brakuje w niej
+m.in. IIS3DWB, bo 1,3 Mbit/s nie przejdzie przez BLE. Płytka i firmware widzą
+komplet — `./stwin probe` to pokazuje.
+
+**Karty SD nie da się odczytać przez USB.** Firmware wystawia interfejs HID
+z protokołem PnPL do sterowania i strumieniowania, nie pamięć masową. Dane
+z karty zdejmuje się czytnikiem albo serwerem FTP przez Wi-Fi (wymaga
+wcześniejszej aktualizacji firmware'u modułu EMW3080, plik w paczce
+FP-SNS-DATALOG2 w `Utilities/WiFi_module_upgrade`). Przy pracy przy biurku
+najprościej w ogóle nie używać karty i strumieniować po USB — tak działają te
+skrypty.
+
+**Montaż decyduje o wyniku bardziej niż model.** Sztywne przykręcenie albo
+klej; taśma dwustronna i pianka działają jak filtr dolnoprzepustowy i kasują
+pasmo powyżej ok. 1 kHz. Przemontowanie czujnika zmienia sygnaturę na tyle, że
+model nauczony przed przeklejeniem będzie zgłaszał fałszywe alarmy — warto mieć
+w danych treningowych kilka różnych montaży.
+
+## Struktura
+
+```
+setup.sh              instalacja SDK i środowiska
+stwin                 wejście do wszystkich narzędzi
+scripts/_common.py    połączenie, wczytywanie nagrań, widma, wykresy
+scripts/probe.py      stan płytki i lista czujników
+scripts/record.py     akwizycja przez USB
+scripts/analyze.py    przebieg czasowy, widmo, PSD
+scripts/compare.py    porównanie dwóch nagrań
+nagrania/             wyniki akwizycji (poza repozytorium)
+vendor/               SDK ST (poza repozytorium, pobierane przez setup.sh)
+docs/plan-poc.md      plan proof of concept i wnioski z rozpoznania
+```
+
+## Diagnostyka
+
+SDK jest bardzo gadatliwe i część jego komunikatów to zwykłe `print()`
+sformatowane tak, żeby wyglądały jak wpisy loggera — dlatego skrypty filtrują
+wyjście. Jeśli coś nie działa i chcesz zobaczyć wszystko:
+
+```bash
+STWIN_DEBUG=1 ./stwin probe
+```
+
+Gdy płytka nie jest znajdowana: sprawdź, czy kabel USB-C przesyła dane, czy nie
+trzyma urządzenia inny program (GUI SDK, ST BLE Sensor przez USB) i czy płytka
+nie zawiesiła się po przerwanej akwizycji — wtedy pomaga przycisk reset.
+
+## Wymagania
+
+macOS lub Linux, `git`, `curl`. `uv` i Python 3.12 instalują się same przez
+`setup.sh`. Płytka musi mieć wgrany FP-SNS-DATALOG2 — sprawdzone z wersją 3.3.0.

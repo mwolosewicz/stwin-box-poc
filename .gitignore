@@ -1,0 +1,13 @@
+# Środowisko i SDK - odtwarzane przez ./setup.sh
+.venv/
+vendor/
+.sdk_path
+__pycache__/
+*.pyc
+
+# Nagrania bywają setkami megabajtów - trzymamy je poza repozytorium
+nagrania/*
+!nagrania/.gitkeep
+
+# Wykresy generowane w katalogu głównym
+/*.png

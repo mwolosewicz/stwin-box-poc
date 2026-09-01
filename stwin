@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Jedno wejście do wszystkich narzędzi. Użycie: ./stwin <komenda> [opcje]
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="$REPO_DIR/.venv/bin/python"
+
+if [ ! -x "$PYTHON" ]; then
+    echo "Brak środowiska. Uruchom najpierw: ./setup.sh" >&2
+    exit 1
+fi
+
+usage() {
+    cat <<'EOF'
+Narzędzia do PoC na STWIN.box (FP-SNS-DATALOG2 przez USB).
+
+  ./stwin probe
+        Wypisuje firmware, listę czujników, ich stan i ustawienia.
+
+  ./stwin record NAZWA [--sensor CZUJNIK] [--duration SEKUNDY] [--opis TEKST]
+        Nagrywa akwizycję do katalogu nagrania/. Domyślnie iis3dwb_acc, 10 s.
+        Wyłącza pozostałe czujniki, żeby nie mieszać strumieni.
+
+  ./stwin analyze KATALOG [--rpm OBROTY] [--fmax HZ]
+        Liczy przebieg czasowy, widmo i PSD. Zapisuje widmo.png w katalogu.
+        Podanie --rpm dorysowuje znaczniki 1x, 2x, 3x częstotliwości obrotowej.
+
+  ./stwin compare KATALOG_A KATALOG_B [--rpm OBROTY] [--fmax HZ]
+        Nakłada widma dwóch nagrań i pokazuje ich stosunek.
+        Do porównania stanu sprawnego z uszkodzeniem.
+
+  ./stwin nanoedge KATALOG -sl DLUGOSC_OKNA [-o KATALOG_WY]
+        Konwertuje nagranie do formatu wejściowego NanoEdge AI Studio.
+
+  ./stwin python [...]
+        Surowy interpreter ze środowiska, gdyby trzeba było coś sprawdzić ręcznie.
+EOF
+}
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+    probe)     exec "$PYTHON" "$REPO_DIR/scripts/probe.py" "$@" ;;
+    record)    exec "$PYTHON" "$REPO_DIR/scripts/record.py" "$@" ;;
+    analyze)   exec "$PYTHON" "$REPO_DIR/scripts/analyze.py" "$@" ;;
+    compare)   exec "$PYTHON" "$REPO_DIR/scripts/compare.py" "$@" ;;
+    nanoedge)
+        SDK_DIR="$(cat "$REPO_DIR/.sdk_path")"
+        exec "$PYTHON" "$SDK_DIR/stdatalog_examples/cli_applications/stdatalog_to_nanoedge.py" "$@"
+        ;;
+    python)    exec "$PYTHON" "$@" ;;
+    help|-h|--help) usage ;;
+    *)
+        echo "Nieznana komenda: $CMD" >&2
+        echo "" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
