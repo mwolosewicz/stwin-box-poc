@@ -104,6 +104,19 @@ def connect(acquisition_folder=None):
             "Sprawdź: kabel USB-C obsługujący dane, wgrany FP-SNS-DATALOG2, "
             "brak innego programu trzymającego urządzenie (np. otwarte GUI SDK)."
         )
+
+    # Gdy USB się nie otworzy, fabryka SDK po cichu podstawia backend szeregowy,
+    # który dopiero przy pierwszej komendzie rzuca EmptyCommandResponse. Lepiej
+    # wyłapać to tutaj i powiedzieć, co zrobić.
+    try:
+        with quiet():
+            hsd.get_device_status(0)
+    except Exception:
+        sys.exit(
+            "Płytka jest widoczna na USB, ale nie odpowiada na komendy.\n"
+            "Najczęściej firmware zawiesił się po przerwanej operacji na karcie SD.\n"
+            "Naciśnij przycisk RESET na płytce (albo odłącz USB i baterię) i spróbuj ponownie."
+        )
     return hsd
 
 

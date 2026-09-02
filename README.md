@@ -93,6 +93,49 @@ To jest jedyny sposób zdjęcia danych z karty bez wyjmowania jej z płytki —
 przez USB się nie da, firmware nie zgłasza się jako pamięć masowa. Przydaje się
 przy węźle zamontowanym na stałe przy maszynie.
 
+#### Co przeżywa restart, a co nie
+
+**Hasła nie da się zapisać na płytce.** W kodzie DATALOG2 (`app_netxduo.c`)
+`wifi_password` i `ftp_password` to zwykłe tablice znaków w RAM, zerowane przy
+każdym starcie. Nie ma żadnego zapisu do flasha ani do modułu Wi-Fi. Po każdym
+resecie trzeba je wysłać ponownie — inaczej się nie da bez modyfikacji firmware'u.
+
+Dlatego hasło trzymamy po stronie komputera, w pęku kluczy macOS:
+
+```bash
+./stwin wifi connect --ssid MojaSiec --zapamietaj   # raz, przy pierwszym połączeniu
+./stwin wifi connect --ssid MojaSiec                # potem już bez pytania
+./stwin wifi zapomnij --ssid MojaSiec               # usunięcie wpisu
+```
+
+**SSID, nazwa użytkownika FTP i konfiguracja czujników już przeżywają restart**,
+o ile zapiszesz je na kartę:
+
+```bash
+./stwin wifi save
+```
+
+To wywołuje firmware'owe `save_config`, które zapisuje `device_config.json`
+w katalogu głównym karty SD; przy starcie płytka ten plik wczytuje. Zapisuje się
+komplet ustawień czujników — włączone kanały, ODR, zakresy — więc przydaje się
+też poza kontekstem Wi-Fi, do przygotowania płytki na nagrania w terenie.
+
+> **Uwaga.** `save_config` bez włożonej karty potrafi zawiesić firmware na próbie
+> montowania i wtedy pomaga wyłącznie przycisk RESET. Skrypt sprawdza
+> `sd_mounted` i odmawia, jeśli karty nie ma.
+
+#### Anonimowy FTP
+
+Nie trzeba go włączać — to jest stan domyślny. Firmware startuje z
+`ftp_username = "anonymous"` i pustym hasłem, a kontrola dostępu to zwykłe
+porównanie obu pól. Logujesz się jako `anonymous` z pustym hasłem i działa.
+
+Adresu IP nie da się ustawić z płytki — właściwość `ip` jest tylko do odczytu,
+adres przychodzi z DHCP. Żeby mieć stały adres, zrób na routerze rezerwację
+DHCP po adresie MAC modułu Wi-Fi. Uwaga: MAC pokazywany przez `./stwin probe`
+należy do modułu Bluetooth, nie Wi-Fi — ten drugi zobaczysz na routerze po
+pierwszym udanym połączeniu.
+
 Trzy warunki, o które łatwo się potknąć:
 
 - **Firmware modułu EMW3080 musi być zaktualizowany.** Dokumentacja ST podaje
@@ -179,9 +222,15 @@ wyjście. Jeśli coś nie działa i chcesz zobaczyć wszystko:
 STWIN_DEBUG=1 ./stwin probe
 ```
 
-Gdy płytka nie jest znajdowana: sprawdź, czy kabel USB-C przesyła dane, czy nie
-trzyma urządzenia inny program (GUI SDK, ST BLE Sensor przez USB) i czy płytka
-nie zawiesiła się po przerwanej akwizycji — wtedy pomaga przycisk reset.
+Gdy płytka nie jest znajdowana: sprawdź, czy kabel USB-C przesyła dane i czy nie
+trzyma urządzenia inny program (GUI SDK, ST BLE Sensor przez USB).
+
+Jeśli skrypty mówią, że płytka jest widoczna na USB, ale nie odpowiada na
+komendy — firmware się zawiesił. Zdarza się to po przerwanej operacji na karcie
+SD. Pomaga wyłącznie przycisk RESET; odłączenie samego USB nie wystarczy, gdy
+podpięta jest bateria. SDK w takiej sytuacji po cichu przełącza się na backend
+szeregowy i wywala się dopiero przy pierwszej komendzie, dlatego skrypty
+sprawdzają łączność od razu po połączeniu i mówią wprost, co zrobić.
 
 ## Wymagania
 
