@@ -1,238 +1,315 @@
-# STWIN.box – narzędzia do PoC
+# STWIN.box – PoC tooling
 
-Zestaw skryptów do pracy z płytką **STEVAL-STWINBX1** (STWIN.box) z firmware'em
-**FP-SNS-DATALOG2**, przez USB, bez karty SD i bez telefonu.
+A set of scripts for working with the **STEVAL-STWINBX1** board (STWIN.box)
+running the **FP-SNS-DATALOG2** firmware, over USB, with no SD card and no phone.
 
-Cel: móc w jednej komendzie nagrać drgania maszyny, w drugiej zobaczyć widmo,
-a w trzeciej porównać stan sprawny z uszkodzonym.
+The goal: one command to record a machine's vibration, a second to see the
+spectrum, and a third to compare a healthy state against a damaged one.
 
-## Instalacja
+## Installation
 
 ```bash
-git clone <adres-tego-repo> ~/git/stwin-box-poc
+git clone <this-repo-url> ~/git/stwin-box-poc
 cd ~/git/stwin-box-poc
 ./setup.sh
 ```
 
-`setup.sh` klonuje SDK ST, pobiera jego submoduły, tworzy izolowane środowisko
-na Pythonie 3.12 i instaluje wszystko, co potrzebne. Można go uruchamiać
-wielokrotnie. Zajmuje ok. 2–3 minut przy pierwszym uruchomieniu.
+`setup.sh` clones ST's SDK, fetches its submodules, creates an isolated Python
+3.12 environment and installs everything needed. It can be run repeatedly. The
+first run takes about 2–3 minutes.
 
-Potem podłącz płytkę kablem USB-C (musi obsługiwać dane, nie tylko ładowanie) i:
+Then plug the board in with a USB-C cable (it must carry data, not just power):
 
 ```bash
 ./stwin probe
 ```
 
-## Użycie
+## Usage
 
-### Sprawdzenie płytki
-
-```bash
-./stwin probe            # firmware, lista czujników, do czego który służy
-./stwin probe --json     # pełny status urządzenia
-```
-
-### Nagrywanie
+### Checking the board
 
 ```bash
-./stwin record tlo_biurko --duration 6
-./stwin record wentylator_sprawny --duration 20
-./stwin record wentylator_niewywazony --duration 20 --opis "plastelina 2 g na łopatce"
-./stwin record pralka --sensor ism330dhcx_acc --duration 600
+./stwin probe            # firmware, sensor list, what each one is for
+./stwin probe --json     # full device status
 ```
 
-Nagranie ląduje w `nagrania/<nazwa>_<data>/` jako komplet plików HSDatalog:
-surowe `.dat`, `device_config.json` i `acquisition_info.json`. Domyślnie
-nagrywany jest `iis3dwb_acc`, a pozostałe czujniki są wyłączane, żeby nie
-mieszać strumieni o bardzo różnych częstotliwościach.
+### Preparing the board for mounting
 
-### Analiza
+When the node is to work on its own — mounted at the machine, started with the
+USR button, with data landing on the card — it has to be told beforehand which
+sensors should collect data, and that has to be persisted so it survives a reset:
 
 ```bash
-./stwin analyze nagrania/wentylator_sprawny_20260901_204512
-./stwin analyze nagrania/wentylator_sprawny_20260901_204512 --rpm 2400 --fmax 300
+./stwin prepare --sensor iis3dwb_acc
+./stwin prepare --sensor ism330dhcx_acc,ism330dhcx_gyro
+./stwin prepare --sensor iis3dwb_acc --no-save    # apply only, do not persist
 ```
 
-Zapisuje `widmo.png` w katalogu nagrania: przebieg czasowy, widmo amplitudowe
-w pełnym paśmie i PSD w zakresie niskich częstotliwości. `--rpm` dorysowuje
-znaczniki 1x, 2x, 3x częstotliwości obrotowej — niewyważenie siedzi przy 1x.
+The command enables the listed sensors, disables the rest and writes the
+configuration to the card through the firmware's `save_config`. Along the way it
+shows how much data per hour the chosen set will produce and how many hours the
+card will last — with `iis3dwb_acc` that is 575 MB/h, a little over two days on
+a 32 GB card.
 
-### Porównanie stanu sprawnego z uszkodzonym
+The size is derived from the `sd_dps` field, which the firmware reports for the
+current ODR, and not from the `odr` field — the latter is an enum index, not
+hertz. The firmware rounds `sd_dps` up to a multiple of 512 B, so for slow
+sensors the result is overstated; for the fast ones that dominate the budget the
+error drops below a percent.
+
+While it is at it, `prepare` sets the **board clock** to the computer's time.
+This only matters for acquisitions started without a computer: recordings made
+over USB get the right time by themselves, because the SDK sets the RTC on every
+`start_log`, but an acquisition started from the USR button or from automode has
+nowhere to get it from and the files on the card end up with a date counted from
+zero. Power keeps the clock running — after cutting USB and the battery it has
+to be set again. This can be turned off with `--no-clock`. The time cannot be
+read back from the board, because the firmware does not expose it as a property;
+the only confirmation is the date on the files on the card.
+
+Without `prepare` the same thing can be achieved in a roundabout way —
+`./stwin record` also switches sensors — but the change then lives in RAM only
+and is lost on reset.
+
+### Recording
 
 ```bash
-./stwin compare nagrania/wentylator_sprawny_... nagrania/wentylator_niewywazony_... --rpm 2400
+./stwin record desk_background --duration 6
+./stwin record fan_healthy --duration 20
+./stwin record fan_unbalanced --duration 20 --note "2 g of putty on a blade"
+./stwin record washing_machine --sensor ism330dhcx_acc --duration 600
 ```
 
-Nakłada oba widma i rysuje ich stosunek. Wypisuje, przy której częstotliwości
-wzrost jest największy i ile wynosi. To jest najszybszy sposób sprawdzenia, czy
-uszkodzenie w ogóle jest widoczne — zanim zacznie się budować model.
+The recording lands in `recordings/<name>_<date>/` as a complete set of
+HSDatalog files: the raw `.dat`, `device_config.json` and
+`acquisition_info.json`. By default `iis3dwb_acc` is recorded and the other
+sensors are disabled, so that streams with wildly different rates do not get
+mixed.
 
-Szczyt jest szukany na krzywej wygładzonej (`--smooth`, domyślnie 9 prążków),
-bo estymator Welcha na samym szumie potrafi dać kilkukrotne skoki
-w pojedynczych prążkach. Jeśli wygładzony wzrost nie przekracza 2x, skrypt
-mówi wprost, że klasy nie są rozdzielone.
+### Analysis
 
-### Wi-Fi i serwer FTP
+```bash
+./stwin analyze recordings/fan_healthy_20260901_204512
+./stwin analyze recordings/fan_healthy_20260901_204512 --rpm 2400 --fmax 300
+```
 
-Firmware ma wbudowany serwer FTP udostępniający zawartość karty SD. Konfiguruje
-się go przez USB, bez telefonu:
+Writes `spectrum.png` into the recording's directory: the time series, the
+amplitude spectrum across the full band and the PSD over the low frequencies.
+`--rpm` adds markers at 1x, 2x, 3x of the rotational frequency — imbalance sits
+at 1x.
+
+### Comparing a healthy state against a damaged one
+
+```bash
+./stwin compare recordings/fan_healthy_... recordings/fan_unbalanced_... --rpm 2400
+```
+
+Overlays both spectra and plots their ratio. It prints at which frequency the
+increase is largest and how big it is. This is the fastest way to check whether
+the damage is visible at all — before starting to build a model.
+
+The peak is looked for on the smoothed curve (`--smooth`, 9 bins by default),
+because Welch's estimator can produce several-fold jumps in single bins on noise
+alone. If the smoothed increase does not exceed 2x, the script says outright
+that the classes are not separated.
+
+### Wi-Fi and the FTP server
+
+The firmware has a built-in FTP server that serves the contents of the SD card.
+It is configured over USB, with no phone involved:
 
 ```bash
 ./stwin wifi status
-./stwin wifi connect --ssid MojaSiec        # zapyta o hasło
-./stwin wifi ftp --user maciej              # zapyta o hasło
+./stwin wifi connect --ssid MyNetwork      # will ask for the password
+./stwin wifi ftp --user maciej             # will ask for the password
 ./stwin wifi disconnect
 ```
 
-Pominięcie `--password` powoduje pytanie interaktywne, żeby hasło nie zostawało
-w historii powłoki. Po udanym połączeniu skrypt wypisuje adres, pod którym
-płytka wystawia FTP.
+Omitting `--password` triggers an interactive prompt, so that the password does
+not end up in the shell history. After a successful connection the script prints
+the address the board serves FTP on.
 
-To jest jedyny sposób zdjęcia danych z karty bez wyjmowania jej z płytki —
-przez USB się nie da, firmware nie zgłasza się jako pamięć masowa. Przydaje się
-przy węźle zamontowanym na stałe przy maszynie.
+This is the only way to get data off the card without taking it out of the
+board — it cannot be done over USB, because the firmware does not present itself
+as mass storage. Useful for a node permanently mounted at a machine.
 
-#### Co przeżywa restart, a co nie
+#### What survives a reset and what does not
 
-**Hasła nie da się zapisać na płytce.** W kodzie DATALOG2 (`app_netxduo.c`)
-`wifi_password` i `ftp_password` to zwykłe tablice znaków w RAM, zerowane przy
-każdym starcie. Nie ma żadnego zapisu do flasha ani do modułu Wi-Fi. Po każdym
-resecie trzeba je wysłać ponownie — inaczej się nie da bez modyfikacji firmware'u.
+**The password cannot be stored on the board.** In the DATALOG2 code
+(`app_netxduo.c`) `wifi_password` and `ftp_password` are plain character arrays
+in RAM, zeroed on every boot. There is no write to flash nor to the Wi-Fi
+module. After every reset they have to be sent again — there is no way around it
+without modifying the firmware.
 
-Dlatego hasło trzymamy po stronie komputera, w pęku kluczy macOS:
+That is why the password is kept on the computer side, in the macOS keychain:
 
 ```bash
-./stwin wifi connect --ssid MojaSiec --zapamietaj   # raz, przy pierwszym połączeniu
-./stwin wifi connect --ssid MojaSiec                # potem już bez pytania
-./stwin wifi zapomnij --ssid MojaSiec               # usunięcie wpisu
+./stwin wifi connect --ssid MyNetwork --remember   # once, on the first connection
+./stwin wifi connect --ssid MyNetwork              # afterwards, without being asked
+./stwin wifi forget --ssid MyNetwork               # removing the entry
 ```
 
-**SSID, nazwa użytkownika FTP i konfiguracja czujników już przeżywają restart**,
-o ile zapiszesz je na kartę:
+#### Configuring from a phone, without a computer
+
+Keeping the password in the keychain only helps when you can walk up to the
+board with a laptop and a cable. With a node mounted on a machine that is
+usually impossible — and then BLE is the way out. The same `wifi_config`
+component that `./stwin wifi` drives is exposed over Bluetooth to the **ST BLE
+Sensor** app; in the device model it appears as a separate "Applications ST BLE
+Sensor" entry with a `wifi_config` field. So after a reset you walk up with a
+phone, connect over BLE and send the password from there.
+
+Before the device goes on site, it is worth checking whether it will be visible
+at all and whether the signal reaches the place you want to configure it from:
+
+```bash
+./stwin ble           # looks for the board and shows the signal strength
+./stwin ble --all     # every BLE device, when the board cannot be seen
+```
+
+The board advertises under a name carrying the firmware version — with 3.3.0
+that is `HSD2v33`. You will see it under the same name in the phone app. It also
+advertises during an active USB session, so the test does not require unplugging
+the cable.
+
+An RSSI stronger than −70 dBm means configuring from a phone will be no trouble;
+below −85 dBm you have to walk right up to the device. Measure this **after**
+mounting, from the spot you will realistically operate the node from — the sheet
+metal of a control cabinet can eat tens of dB.
+
+> The ST BLE Sensor app shows an incomplete sensor list (see below), so before
+> trusting this route, walk the whole path once at the desk: reset the board,
+> connect from the phone, enter the password, confirm it got an IP address.
+
+**The SSID, the FTP user name and the sensor configuration do survive a reset**,
+provided you write them to the card:
 
 ```bash
 ./stwin wifi save
 ```
 
-To wywołuje firmware'owe `save_config`, które zapisuje `device_config.json`
-w katalogu głównym karty SD; przy starcie płytka ten plik wczytuje. Zapisuje się
-komplet ustawień czujników — włączone kanały, ODR, zakresy — więc przydaje się
-też poza kontekstem Wi-Fi, do przygotowania płytki na nagrania w terenie.
+This calls the firmware's `save_config`, which writes `device_config.json` into
+the root directory of the SD card; the board loads that file at startup. The
+complete sensor settings are stored — enabled channels, ODRs, ranges — so it is
+useful outside the Wi-Fi context too, for preparing the board for field
+recordings.
 
-> **Uwaga.** `save_config` bez włożonej karty potrafi zawiesić firmware na próbie
-> montowania i wtedy pomaga wyłącznie przycisk RESET. Skrypt sprawdza
-> `sd_mounted` i odmawia, jeśli karty nie ma.
+> **Careful.** `save_config` without a card inserted can hang the firmware while
+> trying to mount it, and then only the RESET button helps. The script checks
+> `sd_mounted` and refuses when there is no card.
 
-#### Anonimowy FTP
+#### Anonymous FTP
 
-Nie trzeba go włączać — to jest stan domyślny. Firmware startuje z
-`ftp_username = "anonymous"` i pustym hasłem, a kontrola dostępu to zwykłe
-porównanie obu pól. Logujesz się jako `anonymous` z pustym hasłem i działa.
+It does not need to be enabled — that is the default state. The firmware starts
+with `ftp_username = "anonymous"` and an empty password, and access control is a
+plain comparison of both fields. You log in as `anonymous` with an empty password
+and it works.
 
-Adresu IP nie da się ustawić z płytki — właściwość `ip` jest tylko do odczytu,
-adres przychodzi z DHCP. Żeby mieć stały adres, zrób na routerze rezerwację
-DHCP po adresie MAC modułu Wi-Fi. Uwaga: MAC pokazywany przez `./stwin probe`
-należy do modułu Bluetooth, nie Wi-Fi — ten drugi zobaczysz na routerze po
-pierwszym udanym połączeniu.
+The IP address cannot be set from the board — the `ip` property is read-only and
+the address comes from DHCP. For a fixed address, make a DHCP reservation on the
+router against the Wi-Fi module's MAC. Careful: the MAC shown by `./stwin probe`
+belongs to the Bluetooth module, not the Wi-Fi one — you will see the latter on
+the router after the first successful connection.
 
-Trzy warunki, o które łatwo się potknąć:
+Three conditions that are easy to trip over:
 
-- **Firmware modułu EMW3080 musi być zaktualizowany.** Dokumentacja ST podaje
-  to jako wymóg działania DATALOG2 na STWIN.box. Plik binarny jest w paczce
-  FP-SNS-DATALOG2, w `Utilities/WiFi_module_upgrade`. Bez tego połączenie nie
-  dojdzie do skutku i skrypt o tym przypomni.
-- **Tylko 2,4 GHz** — moduł nie obsługuje pasma 5 GHz.
-- **Karta SD musi być włożona**, bo FTP serwuje właśnie jej zawartość.
+- **The EMW3080 module's firmware must be up to date.** ST's documentation lists
+  this as a requirement for DATALOG2 to work on the STWIN.box. The binary ships
+  with the FP-SNS-DATALOG2 package, under `Utilities/WiFi_module_upgrade`.
+  Without it the connection will not come up, and the script will say so.
+- **2.4 GHz only** — the module has no 5 GHz support.
+- **An SD card must be inserted**, because FTP serves exactly its contents.
 
-### Eksport do NanoEdge AI Studio
+### Export to NanoEdge AI Studio
 
 ```bash
-./stwin nanoedge nagrania/wentylator_sprawny_... -sl 1024 -o dataset/normalne
-./stwin nanoedge nagrania/wentylator_niewywazony_... -sl 1024 -o dataset/anomalie
+./stwin nanoedge recordings/fan_healthy_... -sl 1024 -o dataset/normal
+./stwin nanoedge recordings/fan_unbalanced_... -sl 1024 -o dataset/anomaly
 ```
 
-`-sl` to długość okna w próbkach; musi być taka sama dla obu klas i taka sama
-jak w konfiguracji na urządzeniu. Wywołuje oryginalny konwerter ST, więc
-przyjmuje wszystkie jego opcje (`-h` pokaże pełną listę).
+`-sl` is the window length in samples; it must be the same for both classes and
+the same as in the on-device configuration. It calls ST's original converter, so
+it accepts all of its options (`-h` shows the full list).
 
-## Wybór czujnika
+## Choosing a sensor
 
-Płytka ma dziewięć czujników i jeden z nich zwykle jest oczywistym wyborem.
+The board has nine sensors and one of them is usually the obvious choice.
 
-| Zadanie | Czujnik | Uwagi |
+| Task | Sensor | Notes |
 |---|---|---|
-| Drgania maszyn, łożyska | `iis3dwb_acc` | 26,7 kHz, pasmo do 6 kHz, 75 µg/√Hz |
-| Długie nagrania (godziny) | `ism330dhcx_acc` | 18 MB/h zamiast 570 MB/h |
-| Wycieki sprężonego powietrza | `imp23absu_mic` | pasmo do 80 kHz, ultradźwięki 25–45 kHz |
-| Przepływ wody, zdarzenia dźwiękowe | `imp34dt05_mic` | pasmo słyszalne |
-| Przechylenia, bardzo niskie f | `iis2iclx_acc` | ±0,5 g, 15 µg/√Hz |
-| Wykrycie pracy silnika | `iis2mdc_mag` | pole rozproszone, darmowy sygnał „urządzenie pobiera prąd" |
-| Czuwanie na baterii | `iis2dlpc_acc` | kilka µA, wybudzanie po progu |
+| Machine vibration, bearings | `iis3dwb_acc` | 26.7 kHz, band up to 6 kHz, 75 µg/√Hz |
+| Long recordings (hours) | `ism330dhcx_acc` | 18 MB/h instead of 570 MB/h |
+| Compressed air leaks | `imp23absu_mic` | band up to 80 kHz, ultrasound 25–45 kHz |
+| Water flow, acoustic events | `imp34dt05_mic` | audible band |
+| Tilt, very low frequencies | `iis2iclx_acc` | ±0.5 g, 15 µg/√Hz |
+| Detecting a running motor | `iis2mdc_mag` | stray field, a free "the device draws current" signal |
+| Battery-powered standby | `iis2dlpc_acc` | a few µA, wake on threshold |
 
-## Rzeczy, które zaskakują
+## Things that catch you out
 
-**Rzeczywiste ODR odbiega od katalogowego.** IIS3DWB przy nominalnych 26 667 Hz
-próbkuje realnie ok. 26 316 Hz. Przy 5 kHz to błąd 66 Hz, wystarczający, żeby
-rozminąć się z częstotliwością łożyskową. Skrypty liczą `fs` ze znaczników
-czasu, nie z nominału — jeśli będziesz pisał własną analizę, rób tak samo.
+**The real ODR differs from the catalogue one.** At a nominal 26,667 Hz the
+IIS3DWB actually samples at about 26,316 Hz. At 5 kHz that is a 66 Hz error,
+enough to miss a bearing frequency. The scripts compute `fs` from the timestamps
+rather than the nominal value — if you write your own analysis, do the same.
 
-**ODR i FS w modelu urządzenia to indeksy enum, nie herce i nie g.** `odr=0`
-dla IIS3DWB oznacza jedyną dostępną wartość, czyli 26 667 Hz.
+**ODR and FS in the device model are enum indices, not hertz and not g.**
+`odr=0` for the IIS3DWB means its only available value, i.e. 26,667 Hz.
 
-**Aplikacja ST BLE Sensor pokazuje niepełną listę czujników.** Brakuje w niej
-m.in. IIS3DWB, bo 1,3 Mbit/s nie przejdzie przez BLE. Płytka i firmware widzą
-komplet — `./stwin probe` to pokazuje.
+**The ST BLE Sensor app shows an incomplete sensor list.** The IIS3DWB is
+missing from it, among others, because 1.3 Mbit/s will not fit through BLE. The
+board and the firmware see the full set — `./stwin probe` shows it.
 
-**Karty SD nie da się odczytać przez USB.** Firmware wystawia interfejs HID
-z protokołem PnPL do sterowania i strumieniowania, nie pamięć masową. Dane
-z karty zdejmuje się czytnikiem albo serwerem FTP przez Wi-Fi (`./stwin wifi`).
-Przy pracy przy biurku najprościej w ogóle nie używać karty i strumieniować po
-USB — tak działają te skrypty.
+**The SD card cannot be read over USB.** The firmware exposes a HID interface
+with the PnPL protocol for control and streaming, not mass storage. Data is
+taken off the card with a reader or through the FTP server over Wi-Fi
+(`./stwin wifi`). When working at a desk it is simplest not to use the card at
+all and stream over USB — that is how these scripts work.
 
-**Montaż decyduje o wyniku bardziej niż model.** Sztywne przykręcenie albo
-klej; taśma dwustronna i pianka działają jak filtr dolnoprzepustowy i kasują
-pasmo powyżej ok. 1 kHz. Przemontowanie czujnika zmienia sygnaturę na tyle, że
-model nauczony przed przeklejeniem będzie zgłaszał fałszywe alarmy — warto mieć
-w danych treningowych kilka różnych montaży.
+**Mounting decides the outcome more than the model does.** Rigid bolting or
+glue; double-sided tape and foam act as a low-pass filter and kill everything
+above roughly 1 kHz. Remounting the sensor changes the signature enough that a
+model trained before the move will raise false alarms — it is worth having
+several different mountings in the training data.
 
-## Struktura
+## Layout
 
 ```
-setup.sh              instalacja SDK i środowiska
-stwin                 wejście do wszystkich narzędzi
-scripts/_common.py    połączenie, wczytywanie nagrań, widma, wykresy
-scripts/probe.py      stan płytki i lista czujników
-scripts/record.py     akwizycja przez USB
-scripts/analyze.py    przebieg czasowy, widmo, PSD
-scripts/compare.py    porównanie dwóch nagrań
-scripts/wifi.py       konfiguracja Wi-Fi i serwera FTP
-nagrania/             wyniki akwizycji (poza repozytorium)
-vendor/               SDK ST (poza repozytorium, pobierane przez setup.sh)
-docs/plan-poc.md      plan proof of concept i wnioski z rozpoznania
+setup.sh              SDK and environment installation
+stwin                 entry point to all the tools
+scripts/_common.py    connection, loading recordings, spectra, plots
+scripts/probe.py      board state and sensor list
+scripts/prepare.py    sensor selection and persisting the configuration to the card
+scripts/record.py     acquisition over USB
+scripts/analyze.py    time series, spectrum, PSD
+scripts/compare.py    comparison of two recordings
+scripts/wifi.py       Wi-Fi and FTP server configuration
+scripts/ble.py        BLE scan - board visibility and signal strength
+recordings/           acquisition results (outside the repository)
+vendor/               ST's SDK (outside the repository, fetched by setup.sh)
+docs/plan-poc.md      proof of concept plan and findings from the survey
 ```
 
-## Diagnostyka
+## Troubleshooting
 
-SDK jest bardzo gadatliwe i część jego komunikatów to zwykłe `print()`
-sformatowane tak, żeby wyglądały jak wpisy loggera — dlatego skrypty filtrują
-wyjście. Jeśli coś nie działa i chcesz zobaczyć wszystko:
+The SDK is very talkative and some of its messages are plain `print()` calls
+formatted to look like logger entries — which is why the scripts filter the
+output. If something does not work and you want to see everything:
 
 ```bash
 STWIN_DEBUG=1 ./stwin probe
 ```
 
-Gdy płytka nie jest znajdowana: sprawdź, czy kabel USB-C przesyła dane i czy nie
-trzyma urządzenia inny program (GUI SDK, ST BLE Sensor przez USB).
+When the board is not found: check that the USB-C cable carries data and that no
+other program is holding the device (the SDK GUI, ST BLE Sensor over USB).
 
-Jeśli skrypty mówią, że płytka jest widoczna na USB, ale nie odpowiada na
-komendy — firmware się zawiesił. Zdarza się to po przerwanej operacji na karcie
-SD. Pomaga wyłącznie przycisk RESET; odłączenie samego USB nie wystarczy, gdy
-podpięta jest bateria. SDK w takiej sytuacji po cichu przełącza się na backend
-szeregowy i wywala się dopiero przy pierwszej komendzie, dlatego skrypty
-sprawdzają łączność od razu po połączeniu i mówią wprost, co zrobić.
+If the scripts say the board is visible on USB but does not answer commands, the
+firmware has hung. This happens after an interrupted SD card operation. Only the
+RESET button helps; unplugging USB alone is not enough when a battery is
+attached. In that situation the SDK quietly falls back to the serial backend and
+only blows up on the first command, which is why the scripts check connectivity
+right after connecting and say plainly what to do.
 
-## Wymagania
+## Requirements
 
-macOS lub Linux, `git`, `curl`. `uv` i Python 3.12 instalują się same przez
-`setup.sh`. Płytka musi mieć wgrany FP-SNS-DATALOG2 — sprawdzone z wersją 3.3.0.
+macOS or Linux, `git`, `curl`. `uv` and Python 3.12 install themselves through
+`setup.sh`. The board must have FP-SNS-DATALOG2 flashed — tested with 3.3.0.

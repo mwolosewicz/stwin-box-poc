@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Konfiguracja Wi-Fi i serwera FTP na płytce, przez USB.
+"""Configures Wi-Fi and the FTP server on the board, over USB.
 
-Firmware wystawia komponent wifi_config z właściwościami ssid i ftp_username
-oraz komendami wifi_connect, wifi_disconnect i set_ftp_credentials.
+The firmware exposes a wifi_config component with ssid and ftp_username
+properties plus wifi_connect, wifi_disconnect and set_ftp_credentials commands.
 
-Czego firmware NIE potrafi: zapamiętać hasła. W kodzie DATALOG2 wifi_password
-i ftp_password to zwykłe tablice znaków w RAM, zerowane przy każdym starcie
-(app_netxduo.c). Nie ma zapisu do flasha. Dlatego hasło trzymamy po stronie
-komputera - w pęku kluczy macOS - i wysyłamy je jedną komendą po każdym
-restarcie płytki.
+What the firmware cannot do: remember a password. In the DATALOG2 code
+wifi_password and ftp_password are plain character arrays in RAM, zeroed on
+every boot (app_netxduo.c). There is no write to flash. So we keep the password
+on the computer side - in the macOS keychain - and send it with a single command
+after every reset of the board.
 """
 
 import argparse
@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-from _common import connect, firmware_line
+from _common import connect, firmware_line, save_to_card
 
 COMP = "wifi_config"
 KEYCHAIN_SERVICE = "stwin-box-poc-wifi"
@@ -42,103 +42,92 @@ def read_status(hsd, dev):
 
 def print_status(hsd, dev):
     ssid, ip, user = read_status(hsd, dev)
-    print(f"  SSID          : {ssid or '(nie ustawiony)'}")
-    print(f"  Adres IP      : {ip or '0.0.0.0'}")
-    print(f"  Użytkownik FTP: {user or '(brak)'}")
+    print(f"  SSID        : {ssid or '(not set)'}")
+    print(f"  IP address  : {ip or '0.0.0.0'}")
+    print(f"  FTP user    : {user or '(none)'}")
     if ip and ip != "0.0.0.0":
-        print(f"\n  Serwer FTP: ftp://{ip}/   (użytkownik: {user or 'anonymous'})")
+        print(f"\n  FTP server: ftp://{ip}/   (user: {user or 'anonymous'})")
     return ip
 
 
-def keychain_dostepny():
+def keychain_available():
     return sys.platform == "darwin"
 
 
-def keychain_odczyt(konto):
-    if not keychain_dostepny():
+def keychain_read(account):
+    if not keychain_available():
         return None
-    wynik = subprocess.run(
-        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", konto, "-w"],
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
         capture_output=True, text=True,
     )
-    return wynik.stdout.strip() if wynik.returncode == 0 else None
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
-def keychain_zapis(konto, wartosc):
-    if not keychain_dostepny():
-        print("Zapamiętywanie haseł działa tylko na macOS - pomijam.")
+def keychain_write(account, value):
+    if not keychain_available():
+        print("Remembering passwords only works on macOS - skipping.")
         return
     subprocess.run(
         ["security", "add-generic-password", "-U", "-s", KEYCHAIN_SERVICE,
-         "-a", konto, "-w", wartosc, "-D", "hasło Wi-Fi dla STWIN.box"],
+         "-a", account, "-w", value, "-D", "Wi-Fi password for STWIN.box"],
         check=True, capture_output=True,
     )
-    print(f"Hasło zapamiętane w pęku kluczy (usługa {KEYCHAIN_SERVICE}, konto {konto}).")
+    print(f"Password stored in the keychain (service {KEYCHAIN_SERVICE}, account {account}).")
 
 
-def keychain_usun(konto):
-    if not keychain_dostepny():
+def keychain_delete(account):
+    if not keychain_available():
         return
-    wynik = subprocess.run(
-        ["security", "delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", konto],
+    result = subprocess.run(
+        ["security", "delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account],
         capture_output=True, text=True,
     )
-    print("Usunięto z pęku kluczy." if wynik.returncode == 0 else "Nie było takiego wpisu.")
+    print("Removed from the keychain." if result.returncode == 0 else "There was no such entry.")
 
 
-def haslo(podane, konto, monit):
-    """Kolejność: argument, pęk kluczy, pytanie interaktywne."""
-    if podane is not None:
-        return podane, False
-    zapisane = keychain_odczyt(konto)
-    if zapisane:
-        print("Używam hasła z pęku kluczy.")
-        return zapisane, True
-    return getpass.getpass(monit), False
-
-
-def karta_obecna(hsd, dev):
-    """save_config zapisuje na kartę SD i bez niej potrafi zawiesić firmware."""
-    try:
-        for c in hsd.get_device(dev)["devices"][dev]["components"]:
-            if list(c.keys())[0] == "log_controller":
-                return bool(c["log_controller"].get("sd_mounted"))
-    except Exception:
-        pass
-    return False
+def password(given, account, prompt):
+    """Order of preference: argument, keychain, interactive prompt."""
+    if given is not None:
+        return given, False
+    stored = keychain_read(account)
+    if stored:
+        print("Using the password from the keychain.")
+        return stored, True
+    return getpass.getpass(prompt), False
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="akcja", required=True)
+    sub = ap.add_subparsers(dest="action", required=True)
 
-    sub.add_parser("status", help="pokazuje bieżącą konfigurację")
+    sub.add_parser("status", help="shows the current configuration")
 
-    p_con = sub.add_parser("connect", help="łączy z siecią Wi-Fi")
+    p_con = sub.add_parser("connect", help="connects to a Wi-Fi network")
     p_con.add_argument("--ssid", required=True)
     p_con.add_argument("--password", default=None,
-                       help="pominięcie: hasło z pęku kluczy albo pytanie interaktywne")
-    p_con.add_argument("--zapamietaj", action="store_true",
-                       help="zapisuje hasło w pęku kluczy macOS na kolejne razy")
+                       help="omit it to use the keychain or be asked interactively")
+    p_con.add_argument("--remember", action="store_true",
+                       help="stores the password in the macOS keychain for next time")
     p_con.add_argument("--timeout", type=float, default=30.0,
-                       help="ile sekund czekać na adres IP")
+                       help="how many seconds to wait for an IP address")
 
-    sub.add_parser("disconnect", help="rozłącza Wi-Fi")
+    sub.add_parser("disconnect", help="disconnects Wi-Fi")
 
-    p_zap = sub.add_parser("zapomnij", help="usuwa hasło z pęku kluczy")
-    p_zap.add_argument("--ssid", required=True)
+    p_forget = sub.add_parser("forget", help="removes the password from the keychain")
+    p_forget.add_argument("--ssid", required=True)
 
-    p_ftp = sub.add_parser("ftp", help="ustawia dane logowania do FTP")
+    p_ftp = sub.add_parser("ftp", help="sets the FTP login credentials")
     p_ftp.add_argument("--user", required=True)
     p_ftp.add_argument("--password", default=None)
 
-    sub.add_parser("save", help="zapisuje konfigurację na kartę SD (bez haseł)")
+    sub.add_parser("save", help="writes the configuration to the SD card (without passwords)")
 
     args = ap.parse_args()
 
-    if args.akcja == "zapomnij":
-        keychain_usun(args.ssid)
+    if args.action == "forget":
+        keychain_delete(args.ssid)
         return
 
     hsd = connect()
@@ -146,20 +135,21 @@ def main():
     print(firmware_line(hsd, dev))
     print()
 
-    if args.akcja == "status":
+    if args.action == "status":
         print_status(hsd, dev)
 
-    elif args.akcja == "connect":
-        pwd, z_pekiem = haslo(args.password, args.ssid, f"Hasło do sieci {args.ssid}: ")
-        if args.zapamietaj and not z_pekiem:
-            keychain_zapis(args.ssid, pwd)
+    elif args.action == "connect":
+        pwd, from_keychain = password(args.password, args.ssid,
+                                      f"Password for network {args.ssid}: ")
+        if args.remember and not from_keychain:
+            keychain_write(args.ssid, pwd)
         hsd.set_property(dev, args.ssid, COMP, "ssid")
         send(hsd, dev, "wifi_connect", "password", pwd)
 
-        print(f"Łączę z {args.ssid}...")
+        print(f"Connecting to {args.ssid}...")
         ip = None
-        koniec = time.time() + args.timeout
-        while time.time() < koniec:
+        deadline = time.time() + args.timeout
+        while time.time() < deadline:
             time.sleep(2)
             _, ip, _ = read_status(hsd, dev)
             if ip and ip != "0.0.0.0":
@@ -167,40 +157,33 @@ def main():
 
         print()
         if not ip or ip == "0.0.0.0":
-            print("Nie dostałem adresu IP w zadanym czasie.\n")
-            print("Najczęstsza przyczyna: nieaktualny firmware modułu EMW3080.")
-            print("Dokumentacja ST wymaga jego aktualizacji przed użyciem Wi-Fi")
-            print("w DATALOG2 - plik binarny jest w paczce FP-SNS-DATALOG2,")
-            print("w katalogu Utilities/WiFi_module_upgrade.")
-            print("\nSprawdź też, czy sieć działa w paśmie 2,4 GHz - moduł nie obsługuje 5 GHz.")
+            print("No IP address within the given time.\n")
+            print("The most common cause: outdated firmware on the EMW3080 module.")
+            print("ST's documentation requires updating it before using Wi-Fi")
+            print("in DATALOG2 - the binary ships with the FP-SNS-DATALOG2 package,")
+            print("under Utilities/WiFi_module_upgrade.")
+            print("\nAlso check the network runs on 2.4 GHz - the module has no 5 GHz.")
         else:
             print_status(hsd, dev)
 
-    elif args.akcja == "disconnect":
+    elif args.action == "disconnect":
         send(hsd, dev, "wifi_disconnect")
-        print("Rozłączono.")
+        print("Disconnected.")
 
-    elif args.akcja == "ftp":
-        pwd, _ = haslo(args.password, f"ftp:{args.user}", f"Hasło FTP dla {args.user}: ")
+    elif args.action == "ftp":
+        pwd, _ = password(args.password, f"ftp:{args.user}", f"FTP password for {args.user}: ")
         hsd.set_property(dev, args.user, COMP, "ftp_username")
         send(hsd, dev, "set_ftp_credentials", "password", pwd)
-        print("Ustawiono dane logowania do FTP.\n")
+        print("FTP credentials set.\n")
         print_status(hsd, dev)
 
-    elif args.akcja == "save":
-        if not karta_obecna(hsd, dev):
-            print("Brak zamontowanej karty SD - przerywam.\n")
-            print("save_config zapisuje device_config.json na kartę i bez niej")
-            print("firmware potrafi się zawiesić na próbie montowania (wtedy")
-            print("pomaga tylko przycisk RESET). Włóż kartę i spróbuj ponownie.")
-            hsd.close()
-            sys.exit(1)
-        print("Zapisuję device_config.json na kartę...")
-        hsd.save_config(dev)
-        print("Zapisano. Przy starcie płytka wczyta ten plik.\n")
-        print("Utrwalone zostają: SSID, nazwa użytkownika FTP oraz zestaw")
-        print("włączonych czujników wraz z ODR i zakresami.")
-        print("NIE zostaje utrwalone hasło - firmware trzyma je wyłącznie w RAM.")
+    elif args.action == "save":
+        print("Writing device_config.json to the card...")
+        save_to_card(hsd, dev)
+        print("Saved. The board will load this file at startup.\n")
+        print("What is persisted: the SSID, the FTP user name and the set of")
+        print("enabled sensors together with their ODRs and ranges.")
+        print("The password is NOT persisted - the firmware keeps it in RAM only.")
 
     hsd.close()
 

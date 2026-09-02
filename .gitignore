@@ -1,13 +1,13 @@
-# Środowisko i SDK - odtwarzane przez ./setup.sh
+# Environment and SDK - recreated by ./setup.sh
 .venv/
 vendor/
 .sdk_path
 __pycache__/
 *.pyc
 
-# Nagrania bywają setkami megabajtów - trzymamy je poza repozytorium
-nagrania/*
-!nagrania/.gitkeep
+# Recordings run to hundreds of megabytes - kept out of the repository
+recordings/*
+!recordings/.gitkeep
 
-# Wykresy generowane w katalogu głównym
+# Plots generated in the root directory
 /*.png

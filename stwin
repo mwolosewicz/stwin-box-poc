@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jedno wejście do wszystkich narzędzi. Użycie: ./stwin <komenda> [opcje]
+# Single entry point to all the tools. Usage: ./stwin <command> [options]
 
 set -euo pipefail
 
@@ -7,41 +7,56 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="$REPO_DIR/.venv/bin/python"
 
 if [ ! -x "$PYTHON" ]; then
-    echo "Brak środowiska. Uruchom najpierw: ./setup.sh" >&2
+    echo "No environment. Run ./setup.sh first" >&2
     exit 1
 fi
 
 usage() {
     cat <<'EOF'
-Narzędzia do PoC na STWIN.box (FP-SNS-DATALOG2 przez USB).
+Tools for the STWIN.box PoC (FP-SNS-DATALOG2 over USB).
 
   ./stwin probe
-        Wypisuje firmware, listę czujników, ich stan i ustawienia.
+        Prints the firmware, the sensor list, their state and settings.
 
-  ./stwin record NAZWA [--sensor CZUJNIK] [--duration SEKUNDY] [--opis TEKST]
-        Nagrywa akwizycję do katalogu nagrania/. Domyślnie iis3dwb_acc, 10 s.
-        Wyłącza pozostałe czujniki, żeby nie mieszać strumieni.
+  ./stwin prepare --sensor SENSOR [--sensor ...] [--odr HZ] [--fs RANGE]
+        Prepares the board for mounting: enables the chosen sensors, disables
+        the rest and writes the configuration to the SD card so it survives a
+        reset. Also sets the board clock and shows how much data per hour the
+        selected set will produce.
 
-  ./stwin analyze KATALOG [--rpm OBROTY] [--fmax HZ]
-        Liczy przebieg czasowy, widmo i PSD. Zapisuje widmo.png w katalogu.
-        Podanie --rpm dorysowuje znaczniki 1x, 2x, 3x częstotliwości obrotowej.
+  ./stwin record NAME [--sensor SENSOR] [--duration SECONDS] [--note TEXT]
+        Records an acquisition into recordings/. Defaults to iis3dwb_acc, 10 s.
+        Disables the other sensors so the streams do not get mixed.
 
-  ./stwin compare KATALOG_A KATALOG_B [--rpm OBROTY] [--fmax HZ]
-        Nakłada widma dwóch nagrań i pokazuje ich stosunek.
-        Do porównania stanu sprawnego z uszkodzeniem.
+  ./stwin analyze DIRECTORY [--rpm SPEED] [--fmax HZ]
+        Computes the time series, spectrum and PSD. Writes spectrum.png into the
+        directory. Passing --rpm adds markers at 1x, 2x, 3x of the rotational
+        frequency.
+
+  ./stwin compare DIR_A DIR_B [--rpm SPEED] [--fmax HZ]
+        Overlays the spectra of two recordings and shows their ratio.
+        For comparing a healthy state against a fault.
 
   ./stwin wifi status
-  ./stwin wifi connect --ssid NAZWA [--password HASLO]
+  ./stwin wifi connect --ssid NAME [--password PASSWORD]
   ./stwin wifi disconnect
-  ./stwin wifi ftp --user NAZWA [--password HASLO]
-        Konfiguracja Wi-Fi i serwera FTP, przez który płytka udostępnia
-        zawartość karty SD. Pominięcie --password wywoła pytanie interaktywne.
+  ./stwin wifi ftp --user NAME [--password PASSWORD]
+        Configuration of Wi-Fi and of the FTP server through which the board
+        serves the contents of its SD card. Omitting --password triggers an
+        interactive prompt.
 
-  ./stwin nanoedge KATALOG -sl DLUGOSC_OKNA [-o KATALOG_WY]
-        Konwertuje nagranie do formatu wejściowego NanoEdge AI Studio.
+  ./stwin ble [--seconds SECONDS] [--all]
+        Checks whether the board advertises over Bluetooth and how strong the
+        signal is. Useful before mounting: the Wi-Fi password has to be sent
+        after every reset from a phone over BLE, so you need to know whether
+        the signal reaches that far.
+
+  ./stwin nanoedge DIRECTORY -sl WINDOW_LENGTH [-o OUT_DIR]
+        Converts a recording into the NanoEdge AI Studio input format.
 
   ./stwin python [...]
-        Surowy interpreter ze środowiska, gdyby trzeba było coś sprawdzić ręcznie.
+        The raw interpreter from the environment, in case something needs
+        checking by hand.
 EOF
 }
 
@@ -50,10 +65,12 @@ shift || true
 
 case "$CMD" in
     probe)     exec "$PYTHON" "$REPO_DIR/scripts/probe.py" "$@" ;;
+    prepare)   exec "$PYTHON" -u "$REPO_DIR/scripts/prepare.py" "$@" ;;
     record)    exec "$PYTHON" "$REPO_DIR/scripts/record.py" "$@" ;;
     analyze)   exec "$PYTHON" "$REPO_DIR/scripts/analyze.py" "$@" ;;
     compare)   exec "$PYTHON" "$REPO_DIR/scripts/compare.py" "$@" ;;
     wifi)      exec "$PYTHON" "$REPO_DIR/scripts/wifi.py" "$@" ;;
+    ble)       exec "$PYTHON" -u "$REPO_DIR/scripts/ble.py" "$@" ;;
     nanoedge)
         SDK_DIR="$(cat "$REPO_DIR/.sdk_path")"
         exec "$PYTHON" "$SDK_DIR/stdatalog_examples/cli_applications/stdatalog_to_nanoedge.py" "$@"
@@ -61,7 +78,7 @@ case "$CMD" in
     python)    exec "$PYTHON" "$@" ;;
     help|-h|--help) usage ;;
     *)
-        echo "Nieznana komenda: $CMD" >&2
+        echo "Unknown command: $CMD" >&2
         echo "" >&2
         usage >&2
         exit 1

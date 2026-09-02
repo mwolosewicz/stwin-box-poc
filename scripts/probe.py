@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Wypisuje stan płytki: firmware i pełną listę czujników z ustawieniami."""
+"""Prints the board state: firmware and the full sensor list with settings."""
 
 import argparse
 import json
 
 from _common import connect, firmware_line
 
-# Katalogowe pasma i przeznaczenie - żeby przy wyborze czujnika nie trzeba było
-# sięgać do dokumentacji ST.
-OPIS = {
-    "iis3dwb_acc": "26,7 kHz, pasmo do 6 kHz, 75 µg/√Hz - drgania, łożyska, ultradźwięki mechaniczne",
-    "ism330dhcx_acc": "do 6,66 kHz - ogólnego przeznaczenia, niewyważenie, długie nagrania",
-    "ism330dhcx_gyro": "żyroskop - przydatny tylko na obiektach, które się obracają",
-    "ism330dhcx_mlc": "Machine Learning Core - klasyfikacja w czujniku, wymaga pliku UCF",
-    "iis2iclx_acc": "inklinometr 2-osiowy, ±0,5 g, 15 µg/√Hz - przechylenia i bardzo niskie częstotliwości",
-    "iis2iclx_mlc": "Machine Learning Core inklinometru, wymaga pliku UCF",
-    "iis2dlpc_acc": "akcelerometr niskiego poboru - czuwanie i wybudzanie",
-    "iis2mdc_mag": "magnetometr - wykrywa pracę silnika po polu rozproszonym",
-    "ilps22qs_press": "barometr - wysokość, szczelność, zmiany ciśnienia",
-    "imp23absu_mic": "mikrofon analogowy do 80 kHz - wycieki sprężonego powietrza, ultradźwięki",
-    "imp34dt05_mic": "mikrofon cyfrowy, pasmo słyszalne - przepływ wody, zdarzenia dźwiękowe",
-    "stts22h_temp": "temperatura ±0,5 °C - kontekst do kompensacji dryfu",
+# Datasheet bandwidths and intended use, so that picking a sensor does not
+# require digging through ST's documentation.
+DESCRIPTIONS = {
+    "iis3dwb_acc": "26.7 kHz, band up to 6 kHz, 75 µg/√Hz - vibration, bearings, mechanical ultrasound",
+    "ism330dhcx_acc": "up to 6.66 kHz - general purpose, imbalance, long recordings",
+    "ism330dhcx_gyro": "gyroscope - only useful on things that rotate",
+    "ism330dhcx_mlc": "Machine Learning Core - in-sensor classification, needs a UCF file",
+    "iis2iclx_acc": "2-axis inclinometer, ±0.5 g, 15 µg/√Hz - tilt and very low frequencies",
+    "iis2iclx_mlc": "inclinometer Machine Learning Core, needs a UCF file",
+    "iis2dlpc_acc": "low-power accelerometer - standby and wake-on-threshold",
+    "iis2mdc_mag": "magnetometer - detects a running motor from its stray field",
+    "ilps22qs_press": "barometer - altitude, tightness, pressure changes",
+    "imp23absu_mic": "analogue microphone up to 80 kHz - compressed air leaks, ultrasound",
+    "imp34dt05_mic": "digital microphone, audible band - water flow, acoustic events",
+    "stts22h_temp": "temperature ±0.5 °C - context for drift compensation",
 }
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--json", action="store_true", help="zrzuca pełny status urządzenia w JSON")
+    ap.add_argument("--json", action="store_true", help="dumps the full device status as JSON")
     args = ap.parse_args()
 
     hsd = connect()
@@ -40,19 +40,19 @@ def main():
         return
 
     names = sorted(hsd.get_sensors_names(dev))
-    print(f"\nCzujniki: {len(names)}\n")
+    print(f"\nSensors: {len(names)}\n")
 
     for name in names:
         try:
             enabled = hsd.get_sensor_enable(dev, name)
         except Exception:
             enabled = None
-        flag = "wł. " if enabled else "wył."
-        print(f"  [{flag}] {name:18s} {OPIS.get(name, '')}")
+        flag = "on " if enabled else "off"
+        print(f"  [{flag}] {name:18s} {DESCRIPTIONS.get(name, '')}")
 
     print(
-        "\nUwaga: wartości ODR i FS w modelu urządzenia to indeksy enum, nie herce.\n"
-        "Rzeczywistą częstotliwość próbkowania wyliczają skrypty analizy ze znaczników czasu."
+        "\nNote: the ODR and FS values in the device model are enum indices, not hertz.\n"
+        "The analysis scripts derive the real sampling rate from the timestamps."
     )
     hsd.close()
 
