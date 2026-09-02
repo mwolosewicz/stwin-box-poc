@@ -30,6 +30,13 @@ Narzędzia do PoC na STWIN.box (FP-SNS-DATALOG2 przez USB).
         Nakłada widma dwóch nagrań i pokazuje ich stosunek.
         Do porównania stanu sprawnego z uszkodzeniem.
 
+  ./stwin wifi status
+  ./stwin wifi connect --ssid NAZWA [--password HASLO]
+  ./stwin wifi disconnect
+  ./stwin wifi ftp --user NAZWA [--password HASLO]
+        Konfiguracja Wi-Fi i serwera FTP, przez który płytka udostępnia
+        zawartość karty SD. Pominięcie --password wywoła pytanie interaktywne.
+
   ./stwin nanoedge KATALOG -sl DLUGOSC_OKNA [-o KATALOG_WY]
         Konwertuje nagranie do formatu wejściowego NanoEdge AI Studio.
 
@@ -46,6 +53,7 @@ case "$CMD" in
     record)    exec "$PYTHON" "$REPO_DIR/scripts/record.py" "$@" ;;
     analyze)   exec "$PYTHON" "$REPO_DIR/scripts/analyze.py" "$@" ;;
     compare)   exec "$PYTHON" "$REPO_DIR/scripts/compare.py" "$@" ;;
+    wifi)      exec "$PYTHON" "$REPO_DIR/scripts/wifi.py" "$@" ;;
     nanoedge)
         SDK_DIR="$(cat "$REPO_DIR/.sdk_path")"
         exec "$PYTHON" "$SDK_DIR/stdatalog_examples/cli_applications/stdatalog_to_nanoedge.py" "$@"

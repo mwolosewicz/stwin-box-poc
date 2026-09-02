@@ -73,6 +73,35 @@ bo estymator Welcha na samym szumie potrafi dać kilkukrotne skoki
 w pojedynczych prążkach. Jeśli wygładzony wzrost nie przekracza 2x, skrypt
 mówi wprost, że klasy nie są rozdzielone.
 
+### Wi-Fi i serwer FTP
+
+Firmware ma wbudowany serwer FTP udostępniający zawartość karty SD. Konfiguruje
+się go przez USB, bez telefonu:
+
+```bash
+./stwin wifi status
+./stwin wifi connect --ssid MojaSiec        # zapyta o hasło
+./stwin wifi ftp --user maciej              # zapyta o hasło
+./stwin wifi disconnect
+```
+
+Pominięcie `--password` powoduje pytanie interaktywne, żeby hasło nie zostawało
+w historii powłoki. Po udanym połączeniu skrypt wypisuje adres, pod którym
+płytka wystawia FTP.
+
+To jest jedyny sposób zdjęcia danych z karty bez wyjmowania jej z płytki —
+przez USB się nie da, firmware nie zgłasza się jako pamięć masowa. Przydaje się
+przy węźle zamontowanym na stałe przy maszynie.
+
+Trzy warunki, o które łatwo się potknąć:
+
+- **Firmware modułu EMW3080 musi być zaktualizowany.** Dokumentacja ST podaje
+  to jako wymóg działania DATALOG2 na STWIN.box. Plik binarny jest w paczce
+  FP-SNS-DATALOG2, w `Utilities/WiFi_module_upgrade`. Bez tego połączenie nie
+  dojdzie do skutku i skrypt o tym przypomni.
+- **Tylko 2,4 GHz** — moduł nie obsługuje pasma 5 GHz.
+- **Karta SD musi być włożona**, bo FTP serwuje właśnie jej zawartość.
+
 ### Eksport do NanoEdge AI Studio
 
 ```bash
@@ -114,11 +143,9 @@ komplet — `./stwin probe` to pokazuje.
 
 **Karty SD nie da się odczytać przez USB.** Firmware wystawia interfejs HID
 z protokołem PnPL do sterowania i strumieniowania, nie pamięć masową. Dane
-z karty zdejmuje się czytnikiem albo serwerem FTP przez Wi-Fi (wymaga
-wcześniejszej aktualizacji firmware'u modułu EMW3080, plik w paczce
-FP-SNS-DATALOG2 w `Utilities/WiFi_module_upgrade`). Przy pracy przy biurku
-najprościej w ogóle nie używać karty i strumieniować po USB — tak działają te
-skrypty.
+z karty zdejmuje się czytnikiem albo serwerem FTP przez Wi-Fi (`./stwin wifi`).
+Przy pracy przy biurku najprościej w ogóle nie używać karty i strumieniować po
+USB — tak działają te skrypty.
 
 **Montaż decyduje o wyniku bardziej niż model.** Sztywne przykręcenie albo
 klej; taśma dwustronna i pianka działają jak filtr dolnoprzepustowy i kasują
@@ -136,6 +163,7 @@ scripts/probe.py      stan płytki i lista czujników
 scripts/record.py     akwizycja przez USB
 scripts/analyze.py    przebieg czasowy, widmo, PSD
 scripts/compare.py    porównanie dwóch nagrań
+scripts/wifi.py       konfiguracja Wi-Fi i serwera FTP
 nagrania/             wyniki akwizycji (poza repozytorium)
 vendor/               SDK ST (poza repozytorium, pobierane przez setup.sh)
 docs/plan-poc.md      plan proof of concept i wnioski z rozpoznania
