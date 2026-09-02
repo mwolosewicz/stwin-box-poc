@@ -24,6 +24,11 @@ Tools for the STWIN.box PoC (FP-SNS-DATALOG2 over USB).
         reset. Also sets the board clock and shows how much data per hour the
         selected set will produce.
 
+  ./stwin clock
+        Reads the board clock and compares it with the computer clock. Worth
+        checking before mounting the device, because acquisitions started from
+        the USR button take their date from it.
+
   ./stwin record NAME [--sensor SENSOR] [--duration SECONDS] [--note TEXT]
         Records an acquisition into recordings/. Defaults to iis3dwb_acc, 10 s.
         Disables the other sensors so the streams do not get mixed.
@@ -66,6 +71,7 @@ shift || true
 case "$CMD" in
     probe)     exec "$PYTHON" "$REPO_DIR/scripts/probe.py" "$@" ;;
     prepare)   exec "$PYTHON" -u "$REPO_DIR/scripts/prepare.py" "$@" ;;
+    clock)     exec "$PYTHON" -u "$REPO_DIR/scripts/clock.py" "$@" ;;
     record)    exec "$PYTHON" "$REPO_DIR/scripts/record.py" "$@" ;;
     analyze)   exec "$PYTHON" "$REPO_DIR/scripts/analyze.py" "$@" ;;
     compare)   exec "$PYTHON" "$REPO_DIR/scripts/compare.py" "$@" ;;

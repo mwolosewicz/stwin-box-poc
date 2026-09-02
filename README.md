@@ -63,9 +63,47 @@ over USB get the right time by themselves, because the SDK sets the RTC on every
 `start_log`, but an acquisition started from the USR button or from automode has
 nowhere to get it from and the files on the card end up with a date counted from
 zero. Power keeps the clock running — after cutting USB and the battery it has
-to be set again. This can be turned off with `--no-clock`. The time cannot be
-read back from the board, because the firmware does not expose it as a property;
-the only confirmation is the date on the files on the card.
+to be set again. This can be turned off with `--no-clock`.
+
+### Checking the board clock
+
+```bash
+./stwin clock
+```
+
+Prints the board's time next to the computer's and the difference between them.
+Worth running before mounting the device, and again after coming back to it —
+the date on everything the board writes to the card on its own depends on it.
+
+The firmware exposes no time property, so there is nothing to simply read: the
+`log_controller` component has a `set_time` command and no counterpart to get it
+back. The one place the clock surfaces is `acquisition_info.start_time`, which
+the firmware stamps when an acquisition starts. So the script starts one for a
+fraction of a second, reads the stamp and stops. The acquisition goes to the USB
+interface rather than to the card, so nothing is written to the card and none
+needs to be inserted.
+
+Two consequences of taking the reading that way. The clock cannot be read while
+a recording is in progress, and it cannot be read with every sensor disabled —
+the firmware refuses to start an acquisition that would collect nothing, and the
+script passes its complaint on rather than reporting the previous acquisition's
+stamp as if it were the current time. And the resolution is one second, so a
+difference of a second or so means the clocks agree.
+
+**The board clock runs slow, and not by a little.** Measured over ten minutes
+against a freshly synchronised start, it lost 1.87% of the elapsed time — 1.1 s
+a minute, 27 minutes a day, holding steady to within a few percent of itself
+across the run. That is the order of magnitude of an RC oscillator rather than a
+crystal, and nothing on the computer's side can compensate for it. Two things
+follow: set the clock immediately before mounting the device rather than the day
+before, and after a day of unattended running treat the dates on the card as
+good to the nearest half hour. If you need to line a card recording up with an
+external log more precisely than that, anchor it on an event visible in both
+signals instead of on the timestamp.
+
+Ironically this makes `./stwin clock` most useful read backwards: the difference
+it prints, divided by that rate, says how long ago the clock was last set. The
+script prints that estimate too.
 
 Without `prepare` the same thing can be achieved in a roundabout way —
 `./stwin record` also switches sensors — but the change then lives in RAM only
@@ -255,6 +293,10 @@ rather than the nominal value — if you write your own analysis, do the same.
 **ODR and FS in the device model are enum indices, not hertz and not g.**
 `odr=0` for the IIS3DWB means its only available value, i.e. 26,667 Hz.
 
+**The board clock loses 27 minutes a day.** See `./stwin clock` above. Anything
+the board timestamps on its own drifts at that rate from the moment the clock was
+set.
+
 **The ST BLE Sensor app shows an incomplete sensor list.** The IIS3DWB is
 missing from it, among others, because 1.3 Mbit/s will not fit through BLE. The
 board and the firmware see the full set — `./stwin probe` shows it.
@@ -279,6 +321,7 @@ stwin                 entry point to all the tools
 scripts/_common.py    connection, loading recordings, spectra, plots
 scripts/probe.py      board state and sensor list
 scripts/prepare.py    sensor selection and persisting the configuration to the card
+scripts/clock.py      reading the board clock and comparing it with the computer's
 scripts/record.py     acquisition over USB
 scripts/analyze.py    time series, spectrum, PSD
 scripts/compare.py    comparison of two recordings
