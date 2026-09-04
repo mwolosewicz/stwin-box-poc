@@ -49,7 +49,26 @@ echo "==> Installing packages"
 uv pip install --quiet --python "$VENV_DIR/bin/python" \
     "$PNPL_WHL" "$CORE_WHL" matplotlib scipy bleak
 
-# --- 4. Path to the SDK --------------------------------------------------
+# --- 4. USB permissions (Linux only) --------------------------------------
+# Without the SDK's udev rules a regular user cannot open the board over USB.
+# Confusingly, ST's library does not report that as an open error - the board
+# then looks connected but never answers commands.
+if [ "$(uname -s)" = "Linux" ]; then
+    RULES_SRC="$SDK_DIR/linux_setup/30-hsdatalog.rules"
+    RULES_DST="/etc/udev/rules.d/30-hsdatalog.rules"
+    if ! cmp -s "$RULES_SRC" "$RULES_DST"; then
+        echo "==> Installing udev rules for board access (requires sudo)"
+        sudo cp "$RULES_SRC" "$RULES_DST"
+        sudo groupadd -f hsdatalog
+        sudo usermod -aG hsdatalog "$USER"
+        sudo udevadm control --reload
+        # Re-apply permissions to an already plugged-in board, no replug needed.
+        sudo udevadm trigger --action=add --subsystem-match=usb
+        echo "    NOTE: group membership takes effect on the next login."
+    fi
+fi
+
+# --- 5. Path to the SDK --------------------------------------------------
 # The scripts need access to stdatalog_examples (LogController), which is not
 # part of the wheels. We store the path so it does not have to be guessed in code.
 echo "$SDK_DIR" > "$REPO_DIR/.sdk_path"
