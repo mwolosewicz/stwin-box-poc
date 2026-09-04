@@ -166,10 +166,12 @@ def load_acquisition(folder, component=None):
         df = HSDatalog.get_dataframe(hsd, comp)[0]
 
     t = df["Time"].to_numpy()
-    # We derive fs from the timestamps rather than the nominal ODR: the IIS3DWB
-    # can deviate from its catalogue 26,667 Hz by more than a percent, which
-    # when hunting for bearing frequencies means an error of tens of hertz.
-    fs = 1.0 / np.median(np.diff(t))
+    # We derive fs from the timestamps rather than the nominal ODR, which for
+    # the ISM330DHCX is 9.5% out. Averaged over the whole span, not from a
+    # median of the differences: the SDK quantises Time to a microsecond, so at
+    # 26 kHz the per-sample differences only ever take the values 37 and 38 µs
+    # and their median lands 1.25% away from the real rate.
+    fs = (len(t) - 1) / (t[-1] - t[0])
     return component, df, fs
 
 

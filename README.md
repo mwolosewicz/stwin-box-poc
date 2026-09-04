@@ -142,6 +142,34 @@ amplitude spectrum across the full band and the PSD over the low frequencies.
 `--rpm` adds markers at 1x, 2x, 3x of the rotational frequency — imbalance sits
 at 1x.
 
+> This loads the whole recording into memory and tops out around 10 M samples —
+> roughly 20 minutes at 7 kHz. On anything longer it analyses the beginning and
+> says so only in the sample count. For recordings measured in hours use
+> `./stwin export` and see [docs/data-analysis.md](docs/data-analysis.md).
+
+### Export for analysis in numpy
+
+```bash
+./stwin export recordings/rura
+./stwin export recordings/rura --float --out /tmp/rura
+```
+
+Rewrites the `.dat` as a flat `.npy` array that `np.load(..., mmap_mode="r")`
+can memory-map, alongside a `.meta.json` with the sampling rate and the
+sensitivity, and the raw per-block timestamps. A 385 MB recording converts in
+under a second and the result is bit-identical to what the SDK returns.
+
+This is the way to work with long recordings. The SDK's reader is built for
+whole files or for sequential streaming, its windowed variant computes file
+offsets from the firmware's nominal rate and drifts by over a second across a
+couple of hours, and it stores parser state inside the component dictionary you
+pass it. With a memory-mapped array none of that applies and no dependency
+beyond numpy is needed.
+
+The conversion also checks the per-packet byte counters and reports gaps, which
+is the only way to notice that the firmware dropped data — the timestamps stay
+plausible either way.
+
 ### Comparing a healthy state against a damaged one
 
 ```bash
@@ -291,10 +319,19 @@ The board has nine sensors and one of them is usually the obvious choice.
 
 ## Things that catch you out
 
-**The real ODR differs from the catalogue one.** At a nominal 26,667 Hz the
-IIS3DWB actually samples at about 26,316 Hz. At 5 kHz that is a 66 Hz error,
-enough to miss a bearing frequency. The scripts compute `fs` from the timestamps
-rather than the nominal value — if you write your own analysis, do the same.
+**The real ODR differs from the catalogue one.** The ISM330DHCX at a nominal
+6,667 Hz was measured at 7,299 Hz — 9.5% out, which at 500 Hz would put a peak
+47 Hz away from where you look for it. The IIS3DWB is well behaved by
+comparison: 26,649 Hz against a nominal 26,667 Hz. The scripts compute `fs`
+from the timestamps rather than the nominal value — if you write your own
+analysis, do the same.
+
+**Do not take a median of the timestamp differences.** The SDK quantises its
+`Time` column to a microsecond, so at 26 kHz the per-sample differences only
+ever come out as 37 or 38 µs. A median picks one of them and claims
+26,316 Hz — a 1.25% error, and the source of a figure that earlier versions of
+this file reported as a property of the sensor. Average over the whole span
+instead: `(len(t) - 1) / (t[-1] - t[0])`.
 
 **ODR and FS in the device model are enum indices, not hertz and not g.**
 `odr=0` for the IIS3DWB means its only available value, i.e. 26,667 Hz.
@@ -306,6 +343,14 @@ set.
 **The ST BLE Sensor app shows an incomplete sensor list.** The IIS3DWB is
 missing from it, among others, because 1.3 Mbit/s will not fit through BLE. The
 board and the firmware see the full set — `./stwin probe` shows it.
+
+**The card has to be FAT32, and that caps a recording at 4 GiB.** The firmware
+does not support exFAT: in the DATALOG2 project for the STWIN.box,
+`FileX/Target/fx_user.h` has `#define FX_ENABLE_EXFAT` commented out — exFAT
+needs a separate licence from Microsoft — and nothing else in the project turns
+it on. An exFAT card will not mount. The 4 GiB ceiling on a single file works
+out at 27 hours of `ism330dhcx_acc` at 6.7 kHz, or under 8 hours of
+`iis3dwb_acc`. ST tested with FAT32 formatted at a 32 KB allocation unit.
 
 **The SD card cannot be read over USB.** The firmware exposes a HID interface
 with the PnPL protocol for control and streaming, not mass storage. Data is
@@ -330,12 +375,16 @@ scripts/prepare.py    sensor selection and persisting the configuration to the c
 scripts/clock.py      reading the board clock and comparing it with the computer's
 scripts/record.py     acquisition over USB
 scripts/analyze.py    time series, spectrum, PSD
+scripts/export.py     conversion of a recording to a flat .npy array
 scripts/compare.py    comparison of two recordings
 scripts/wifi.py       Wi-Fi and FTP server configuration
 scripts/ble.py        BLE scan - board visibility and signal strength
 recordings/           acquisition results (outside the repository)
 vendor/               ST's SDK (outside the repository, fetched by setup.sh)
 docs/plan-poc.md      proof of concept plan and findings from the survey
+docs/data-analysis.md browsing and analysing recordings, with exercises
+docs/zbieranie-danych.md  collecting a day of data and separating water sources
+docs/hydrofor-rul.md  predicting when the hydrophore's air cushion runs out
 ```
 
 ## Troubleshooting

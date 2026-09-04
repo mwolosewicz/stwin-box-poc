@@ -39,6 +39,11 @@ Tools for the STWIN.box PoC (FP-SNS-DATALOG2 over USB).
         directory. Passing --rpm adds markers at 1x, 2x, 3x of the rotational
         frequency.
 
+  ./stwin export DIRECTORY [--sensor SENSOR] [--out DIR] [--float]
+        Converts a recording into a flat .npy array plus a metadata file, so
+        that analysis can be done with plain numpy and the SDK is not needed.
+        Necessary for long recordings, which analyze cannot handle.
+
   ./stwin compare DIR_A DIR_B [--rpm SPEED] [--fmax HZ]
         Overlays the spectra of two recordings and shows their ratio.
         For comparing a healthy state against a fault.
@@ -75,6 +80,7 @@ case "$CMD" in
     clock)     exec "$PYTHON" -u "$REPO_DIR/scripts/clock.py" "$@" ;;
     record)    exec "$PYTHON" "$REPO_DIR/scripts/record.py" "$@" ;;
     analyze)   exec "$PYTHON" "$REPO_DIR/scripts/analyze.py" "$@" ;;
+    export)    exec "$PYTHON" "$REPO_DIR/scripts/export.py" "$@" ;;
     compare)   exec "$PYTHON" "$REPO_DIR/scripts/compare.py" "$@" ;;
     wifi)      exec "$PYTHON" "$REPO_DIR/scripts/wifi.py" "$@" ;;
     ble)       exec "$PYTHON" -u "$REPO_DIR/scripts/ble.py" "$@" ;;
