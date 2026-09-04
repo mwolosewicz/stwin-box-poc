@@ -2,6 +2,7 @@
 """Records an acquisition over USB into recordings/<name>_<date>."""
 
 import argparse
+import os
 import shutil
 import sys
 import time
@@ -32,12 +33,16 @@ def main():
                          "'all' leaves the current configuration untouched")
     ap.add_argument("--duration", type=float, default=10.0, help="recording length in seconds")
     ap.add_argument("--note", default="", help="note stored in the acquisition metadata")
+    ap.add_argument("--out", default=os.environ.get("STWIN_RECORDINGS"),
+                    help="directory to save recordings into (default: recordings/ "
+                         "in the repo; can also be set with $STWIN_RECORDINGS)")
     args = ap.parse_args()
 
     LogController = load_log_controller()
 
-    RECORDINGS.mkdir(parents=True, exist_ok=True)
-    hsd = connect(acquisition_folder=RECORDINGS)
+    recordings_dir = Path(args.out).expanduser() if args.out else RECORDINGS
+    recordings_dir.mkdir(parents=True, exist_ok=True)
+    hsd = connect(acquisition_folder=recordings_dir)
     dev = 0
     print(firmware_line(hsd, dev))
 
@@ -68,7 +73,7 @@ def main():
 
     raw = Path(hsd.get_acquisition_folder())
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    target = RECORDINGS / f"{args.name}_{stamp}"
+    target = recordings_dir / f"{args.name}_{stamp}"
     if raw != target:
         shutil.move(str(raw), str(target))
 

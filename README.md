@@ -116,6 +116,7 @@ and is lost on reset.
 ./stwin record fan_healthy --duration 20
 ./stwin record fan_unbalanced --duration 20 --note "2 g of putty on a blade"
 ./stwin record washing_machine --sensor ism330dhcx_acc --duration 600
+./stwin record pump_baseline --duration 60 --out /mnt/usb/recordings
 ```
 
 The recording lands in `recordings/<name>_<date>/` as a complete set of
@@ -123,6 +124,11 @@ HSDatalog files: the raw `.dat`, `device_config.json` and
 `acquisition_info.json`. By default `iis3dwb_acc` is recorded and the other
 sensors are disabled, so that streams with wildly different rates do not get
 mixed.
+
+`--out` points the recording somewhere else — useful when the repo sits on a
+small or slow disk, like the SD card of a Raspberry Pi, and the data should go
+to an attached drive. The same thing can be set once and for all with the
+`STWIN_RECORDINGS` environment variable; the flag wins when both are given.
 
 ### Analysis
 
