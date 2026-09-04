@@ -11,3 +11,7 @@ recordings/*
 
 # Plots generated in the root directory
 /*.png
+
+# Working notes - kept local, not published
+docs/
+images/
