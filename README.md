@@ -193,7 +193,7 @@ It is configured over USB, with no phone involved:
 ```bash
 ./stwin wifi status
 ./stwin wifi connect --ssid MyNetwork      # will ask for the password
-./stwin wifi ftp --user maciej             # will ask for the password
+./stwin wifi ftp --user username           # will ask for the password
 ./stwin wifi disconnect
 ```
 
@@ -381,7 +381,6 @@ scripts/wifi.py       Wi-Fi and FTP server configuration
 scripts/ble.py        BLE scan - board visibility and signal strength
 recordings/           acquisition results (outside the repository)
 vendor/               ST's SDK (outside the repository, fetched by setup.sh)
-docs/plan-poc.md      proof of concept plan and findings from the survey
 docs/data-analysis.md browsing and analysing recordings, with exercises
 docs/zbieranie-danych.md  collecting a day of data and separating water sources
 docs/hydrofor-rul.md  predicting when the hydrophore's air cushion runs out
