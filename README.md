@@ -116,6 +116,9 @@ and is lost on reset.
 ./stwin record fan_healthy --duration 20
 ./stwin record fan_unbalanced --duration 20 --note "2 g of putty on a blade"
 ./stwin record washing_machine --sensor ism330dhcx_acc --duration 600
+./stwin record bearing --sensor iis3dwb_acc,ism330dhcx_acc \
+  --odr iis3dwb_acc=26667 --odr ism330dhcx_acc=6667 \
+  --fs ism330dhcx_acc=16 --duration 60
 ./stwin record pump_baseline --duration 60 --out /mnt/usb/recordings
 ```
 
@@ -123,7 +126,10 @@ The recording lands in `recordings/<name>_<date>/` as a complete set of
 HSDatalog files: the raw `.dat`, `device_config.json` and
 `acquisition_info.json`. By default `iis3dwb_acc` is recorded and the other
 sensors are disabled, so that streams with wildly different rates do not get
-mixed.
+mixed. Pass a comma-separated list to `--sensor` to record several sensors at
+once. `--odr NAME=HZ` and `--fs NAME=RANGE` set a sensor's output data rate and
+measurement range; repeat either option to configure multiple sensors. Use
+`--sensor all` to keep the board's current sensor configuration unchanged.
 
 `--out` points the recording somewhere else — useful when the repo sits on a
 small or slow disk, like the SD card of a Raspberry Pi, and the data should go

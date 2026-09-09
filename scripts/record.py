@@ -29,8 +29,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("name", help="recording label, e.g. fan_healthy")
     ap.add_argument("--sensor", default="iis3dwb_acc",
-                    help="sensor to record (default iis3dwb_acc); "
-                         "'all' leaves the current configuration untouched")
+                    help="sensor or comma-separated list to record "
+                         "(default: iis3dwb_acc); 'all' leaves the current "
+                         "configuration untouched")
+    ap.add_argument("--odr", action="append", default=[], metavar="NAME=HZ",
+                    help="sensor ODR, e.g. --odr ism330dhcx_acc=6667 "
+                         "(may be repeated)")
+    ap.add_argument("--fs", action="append", default=[], metavar="NAME=RANGE",
+                    help="measurement range, e.g. --fs ism330dhcx_acc=16 "
+                         "(may be repeated)")
     ap.add_argument("--duration", type=float, default=10.0, help="recording length in seconds")
     ap.add_argument("--note", default="", help="note stored in the acquisition metadata")
     ap.add_argument("--out", default=os.environ.get("STWIN_RECORDINGS"),
@@ -46,18 +53,31 @@ def main():
     dev = 0
     print(firmware_line(hsd, dev))
 
+    available = hsd.get_sensors_names(dev)
     if args.sensor != "all":
-        available = hsd.get_sensors_names(dev)
-        if args.sensor not in available:
-            sys.exit(f"No sensor '{args.sensor}'. Available: {', '.join(sorted(available))}")
+        wanted = {name.strip() for name in args.sensor.split(",") if name.strip()}
+        unknown = wanted - set(available)
+        if unknown:
+            sys.exit(f"No sensor: {', '.join(sorted(unknown))}. "
+                     f"Available: {', '.join(sorted(available))}")
         # Disable the rest: parallel streams with wildly different ODRs load the
         # USB link for nothing and make the later analysis harder.
         for name in available:
             if name.endswith(("_mlc", "_ispu")):
                 continue
-            hsd.set_sensor_enable(dev, name == args.sensor, name)
+            hsd.set_sensor_enable(dev, name in wanted, name)
 
-    active = [n for n in hsd.get_sensors_names(dev) if hsd.get_sensor_enable(dev, n)]
+    for option, setter in ((args.odr, hsd.set_sensor_odr),
+                           (args.fs, hsd.set_sensor_fs)):
+        for item in option:
+            try:
+                name, value = item.split("=", 1)
+                value = float(value)
+            except ValueError:
+                ap.error(f"invalid sensor setting '{item}'; expected NAME=NUMBER")
+            setter(dev, value, name.strip())
+
+    active = [n for n in available if hsd.get_sensor_enable(dev, n)]
     print(f"Active sensors: {', '.join(active)}")
 
     hsd.set_acquisition_info(dev, args.name, args.note or f"{args.duration:g} s")
