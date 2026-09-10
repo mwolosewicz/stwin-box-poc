@@ -51,47 +51,61 @@ def main():
     recordings_dir.mkdir(parents=True, exist_ok=True)
     hsd = connect(acquisition_folder=recordings_dir)
     dev = 0
-    print(firmware_line(hsd, dev))
-
-    available = hsd.get_sensors_names(dev)
-    if args.sensor != "all":
-        wanted = {name.strip() for name in args.sensor.split(",") if name.strip()}
-        unknown = wanted - set(available)
-        if unknown:
-            sys.exit(f"No sensor: {', '.join(sorted(unknown))}. "
-                     f"Available: {', '.join(sorted(available))}")
-        # Disable the rest: parallel streams with wildly different ODRs load the
-        # USB link for nothing and make the later analysis harder.
-        for name in available:
-            if name.endswith(("_mlc", "_ispu")):
-                continue
-            hsd.set_sensor_enable(dev, name in wanted, name)
-
-    for option, setter in ((args.odr, hsd.set_sensor_odr),
-                           (args.fs, hsd.set_sensor_fs)):
-        for item in option:
-            try:
-                name, value = item.split("=", 1)
-                value = float(value)
-            except ValueError:
-                ap.error(f"invalid sensor setting '{item}'; expected NAME=NUMBER")
-            setter(dev, value, name.strip())
-
-    active = [n for n in available if hsd.get_sensor_enable(dev, n)]
-    print(f"Active sensors: {', '.join(active)}")
-
-    hsd.set_acquisition_info(dev, args.name, args.note or f"{args.duration:g} s")
-
-    controller = LogController(hsd, lambda _: None, show_packet_loss_warnings=True)
-    print(f"Recording {args.duration:g} s...")
-    controller.start(device_id=dev)
     try:
-        time.sleep(args.duration)
-    except KeyboardInterrupt:
-        print("Interrupted, closing files.")
-    controller.stop(device_id=dev)
+        print(firmware_line(hsd, dev))
 
-    raw = Path(hsd.get_acquisition_folder())
+        available = hsd.get_sensors_names(dev)
+        if args.sensor != "all":
+            wanted = {name.strip() for name in args.sensor.split(",") if name.strip()}
+            unknown = wanted - set(available)
+            if unknown:
+                sys.exit(f"No sensor: {', '.join(sorted(unknown))}. "
+                         f"Available: {', '.join(sorted(available))}")
+            # Disable the rest: parallel streams with wildly different ODRs load the
+            # USB link for nothing and make the later analysis harder.
+            for name in available:
+                if name.endswith(("_mlc", "_ispu")):
+                    continue
+                hsd.set_sensor_enable(dev, name in wanted, name)
+
+        for option, setter in ((args.odr, hsd.set_sensor_odr),
+                               (args.fs, hsd.set_sensor_fs)):
+            for item in option:
+                try:
+                    name, value = item.split("=", 1)
+                    value = float(value)
+                except ValueError:
+                    ap.error(f"invalid sensor setting '{item}'; expected NAME=NUMBER")
+                setter(dev, value, name.strip())
+
+        active = [n for n in available if hsd.get_sensor_enable(dev, n)]
+        print(f"Active sensors: {', '.join(active)}")
+
+        hsd.set_acquisition_info(dev, args.name, args.note or f"{args.duration:g} s")
+
+        controller = LogController(hsd, lambda _: None, show_packet_loss_warnings=True)
+        print(f"Recording {args.duration:g} s...")
+        try:
+            controller.start(device_id=dev)
+            try:
+                time.sleep(args.duration)
+            except KeyboardInterrupt:
+                print("Interrupted, closing files.")
+        finally:
+            controller.stop(device_id=dev)
+
+        raw = Path(hsd.get_acquisition_folder())
+    finally:
+        # Releasing the process file descriptors is not equivalent to closing
+        # libhs_datalog: the native PnPL backend requires an explicit close.
+        try:
+            if hsd.close() is False:
+                print("Warning: the USB communication engine did not close cleanly.",
+                      file=sys.stderr)
+        except Exception as exc:
+            print(f"Warning: could not close the USB communication engine: {exc}",
+                  file=sys.stderr)
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     target = recordings_dir / f"{args.name}_{stamp}"
     if raw != target:

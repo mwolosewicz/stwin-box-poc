@@ -113,10 +113,14 @@ def connect(acquisition_folder=None):
         with quiet():
             hsd.get_device_status(0)
     except Exception:
+        # The PnPL backend does not close its native communication engine from
+        # a destructor. Release it explicitly even when the health check fails.
+        with contextlib.suppress(Exception):
+            hsd.close()
         sys.exit(
             "The board is visible on USB but does not answer commands.\n"
-            "Usually the firmware hung after an interrupted SD card operation.\n"
-            "Press RESET on the board (or unplug USB and the battery) and try again."
+            "The USB transport may be stuck after an earlier acquisition.\n"
+            "Close other clients or reset the USB connection and try again."
         )
     return hsd
 
